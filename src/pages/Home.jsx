@@ -90,7 +90,7 @@ export default function Home() {
   const jobCategories = jobCategoriesData
 
   const marqueeItems = [
-    { text: 'Instant PKR 500 Activation' },
+    { text: 'Test Fee PKR 500 Activation' },
     { text: 'Task Marketplace' },
     { text: 'Real-Time Direct Messaging' },
     { text: '4.9/5 Rating Average' },
@@ -179,7 +179,7 @@ export default function Home() {
                 onClick={() => navigate('/signup')}
                 className="btn-primary w-auto py-4 px-10 text-base lg:text-lg inline-flex items-center gap-3 justify-center shadow-yellow-glow hover:scale-105 transition-transform"
               >
-                Join SmAds Now — PKR 500 <IconArrowRight />
+                Join SmAds Now — For Free <IconArrowRight />
               </button>
               <button
                 onClick={() => {
@@ -206,7 +206,7 @@ export default function Home() {
             </div>
             <div className="hidden sm:block w-px h-10 bg-white/20" />
             <div className="text-center">
-              <div className="text-3xl font-black text-amber-300">PKR 500</div>
+              <div className="text-3xl font-black text-amber-300">For Free</div>
               <div className="text-xs text-white/70 font-medium mt-1">Instant Verification Fee</div>
             </div>
             <div className="hidden sm:block w-px h-10 bg-white/20" />
