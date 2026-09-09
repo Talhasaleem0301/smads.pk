@@ -1,0 +1,10 @@
+<svg width="150" height="40" viewBox="0 0 150 40" xmlns="http://www.w3.org/2000/svg">
+  <!-- Mark -->
+  <rect x="0" y="4" width="32" height="32" rx="9" fill="#ffffff" fill-opacity="0.12"/>
+  <path d="M9 24.5 L15.5 13 L19 20 L22 15 L27 24.5" stroke="#facc15" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="24.5" cy="12.5" r="2.3" fill="#facc15"/>
+
+  <!-- Wordmark -->
+  <text x="40" y="26" font-family="Sora, Arial, sans-serif" font-weight="800" font-size="19" fill="#ffffff">Sm</text>
+  <text x="70" y="26" font-family="Sora, Arial, sans-serif" font-weight="800" font-size="19" fill="#facc15">Ads</text>
+</svg>

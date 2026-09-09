@@ -1,0 +1,487 @@
+================================================================================
+  i-Lab Solutions — SUPER BEGINNER FRIENDLY SUPABASE SETUP GUIDE
+================================================================================
+
+Welcome! This guide is written step-by-step so ANYONE can set up Supabase and 
+run this project easily. Just follow each step one by one!
+
+================================================================================
+STEP 1: Create a Free Supabase Account with Google
+================================================================================
+1. Open your web browser (Chrome, Firefox, Edge, or Safari).
+2. Go to this website: https://supabase.com
+3. Click the green "Start your project" button (or "Sign In" at the top right).
+4. Click "Continue with Google" and sign in with your Google account.
+
+
+================================================================================
+STEP 2: Create a New Supabase Project
+================================================================================
+1. On your Supabase dashboard, click the green "+ New project" button.
+2. Select your Organization (if asked, click your name).
+3. Fill in the project details:
+   - Name: i-Lab Solutions
+   - Database Password: Type any password you like (e.g. MySuperPassword123!)
+   - Region: Choose any location close to you (e.g. Frankfurt, Singapore, US East).
+4. Click the green "Create new project" button at the bottom.
+5. Wait 1–2 minutes while Supabase sets up your database.
+
+
+================================================================================
+STEP 3: Copy Your API Credentials (URL & Anon Key)
+================================================================================
+1. Look at the left sidebar menu on Supabase.
+2. Scroll down to the bottom of the sidebar and click "Project Settings" (icon looks like a gear ⚙️).
+3. In the sub-menu under Configuration, click "API".
+4. You will see two important boxes:
+
+   Box A) Project URL:
+   Looks like: https://xxxxxxxxx.supabase.co
+   -> Click the "Copy" button next to it.
+
+   Box B) Project API keys -> anon (public):
+   Looks like: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   -> Click the "Copy" button next to it.
+
+
+================================================================================
+STEP 4: Create & Save Your Local .env File
+================================================================================
+1. Open the project folder on your computer.
+2. Open the folder named "frontend".
+3. Inside "frontend", create a new file named exactly: .env
+4. Open the ".env" file in any text editor (Notepad, VS Code, etc.) and paste this:
+
+VITE_SUPABASE_URL=https://your-project-id.supabase.co
+VITE_SUPABASE_ANON_KEY=your-copied-anon-key-here
+
+(Replace https://your-project-id.supabase.co with your real Project URL from Step 3)
+(Replace your-copied-anon-key-here with your real anon key from Step 3)
+
+5. Save the file.
+
+
+================================================================================
+STEP 5: Set Up Database Tables (Run SQL Script)
+================================================================================
+1. Go back to your Supabase web browser tab.
+2. On the left sidebar menu, click "SQL Editor" (icon looks like >_).
+3. Click the green "+ New query" button at the top left.
+4. Copy ALL the SQL code below between the lines, paste it into the SQL editor text box, and click the "Run" button (or press Ctrl+Enter):
+
+------------------------------- COPY EVERYTHING BELOW ---------------------------
+
+-- 1. GRANT PERMISSIONS ON PUBLIC SCHEMA
+GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO postgres, anon, authenticated, service_role;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO postgres, anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres, anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO postgres, anon, authenticated, service_role;
+
+-- 2. ENUM TYPES
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+    CREATE TYPE user_role AS ENUM ('worker', 'employer', 'admin');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'account_status') THEN
+    CREATE TYPE account_status AS ENUM ('pending_payment', 'active', 'expired', 'inactive', 'blocked');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'test_status') THEN
+    CREATE TYPE test_status AS ENUM ('not_scheduled', 'scheduled', 'pending_verification', 'passed', 'failed');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_status') THEN
+    CREATE TYPE payment_status AS ENUM ('PENDING', 'PAID', 'FAILED');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'proof_status') THEN
+    CREATE TYPE proof_status AS ENUM ('Pending Review', 'Approved', 'Rejected', 'Paid');
+  END IF;
+END $$;
+
+-- If enum exists but is missing 'blocked'
+DO $$ BEGIN
+  ALTER TYPE account_status ADD VALUE IF NOT EXISTS 'blocked';
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- 2b. RPC FUNCTIONS (for post likes counter)
+CREATE OR REPLACE FUNCTION public.increment_likes(post_id_input UUID)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE public.posts SET likes_count = likes_count + 1 WHERE id = post_id_input;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.decrement_likes(post_id_input UUID)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE public.posts SET likes_count = GREATEST(likes_count - 1, 0) WHERE id = post_id_input;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 3. PROFILES TABLE (Extends Supabase auth.users)
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL UNIQUE,
+  role user_role DEFAULT 'worker',
+  registration_fee_paid BOOLEAN DEFAULT FALSE,
+  account_status account_status DEFAULT 'pending_payment',
+  last_active_at TIMESTAMPTZ DEFAULT NOW(),
+  expired_at TIMESTAMPTZ DEFAULT NULL,
+  bio TEXT DEFAULT '',
+  connections INTEGER DEFAULT 0,
+  rating NUMERIC(3,2) DEFAULT NULL,
+  review_count INTEGER DEFAULT 0,
+  work_history JSONB DEFAULT '[]'::jsonb,
+  test_status test_status DEFAULT 'not_scheduled',
+  test_available_at TIMESTAMPTZ DEFAULT NULL,
+  test_score INTEGER DEFAULT NULL,
+  test_verification_code TEXT DEFAULT NULL,
+  test_verification_expires TIMESTAMPTZ DEFAULT NULL,
+  avatar_url TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. PAYMENTS TABLE
+CREATE TABLE IF NOT EXISTS public.payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  invoice_no TEXT UNIQUE NOT NULL,
+  amount NUMERIC(10,2) NOT NULL DEFAULT 500.00,
+  currency TEXT DEFAULT 'PKR',
+  gateway TEXT NOT NULL,
+  account_number TEXT NOT NULL,
+  transaction_ref TEXT DEFAULT '',
+  status payment_status DEFAULT 'PENDING',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. PAYMENT PROOFS TABLE (Screenshot verification)
+CREATE TABLE IF NOT EXISTS public.payment_proofs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  txn_id TEXT UNIQUE NOT NULL,
+  worker TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Registration Fee',
+  method TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  date TEXT NOT NULL,
+  status proof_status DEFAULT 'Pending Review',
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  payment_id UUID REFERENCES public.payments(id) ON DELETE SET NULL,
+  screenshot_url TEXT DEFAULT '',
+  reviewed_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  reviewed_at TIMESTAMPTZ DEFAULT NULL,
+  rejection_reason TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. WALLETS TABLE
+CREATE TABLE IF NOT EXISTS public.wallets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID UNIQUE NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  balance NUMERIC(10,2) DEFAULT 0.00,
+  total_earned NUMERIC(10,2) DEFAULT 0.00,
+  total_withdrawn NUMERIC(10,2) DEFAULT 0.00,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. JOBS TABLE (Employers job postings & categories)
+CREATE TABLE IF NOT EXISTS public.jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  budget NUMERIC(10,2) DEFAULT 0.00,
+  duration TEXT DEFAULT '',
+  status TEXT DEFAULT 'open',
+  employer_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. JOB APPLICATIONS TABLE
+CREATE TABLE IF NOT EXISTS public.job_applications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id UUID REFERENCES public.jobs(id) ON DELETE CASCADE,
+  job_slug TEXT NOT NULL,
+  applicant_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  category_name TEXT NOT NULL,
+  cover_letter TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. POSTS TABLE (Social Feed)
+CREATE TABLE IF NOT EXISTS public.posts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  author_name TEXT NOT NULL,
+  author_role TEXT DEFAULT 'worker',
+  content TEXT NOT NULL,
+  media_url TEXT DEFAULT '',
+  likes_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 10. POST LIKES TABLE
+CREATE TABLE IF NOT EXISTS public.post_likes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  post_id UUID NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (post_id, user_id)
+);
+
+-- 11. CONVERSATIONS TABLE (1:1 Chat)
+CREATE TABLE IF NOT EXISTS public.conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_1 UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  participant_2 UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  last_message TEXT DEFAULT '',
+  last_message_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 12. MESSAGES TABLE
+CREATE TABLE IF NOT EXISTS public.messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL REFERENCES public.conversations(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 13. NOTIFICATIONS TABLE
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  message TEXT NOT NULL,
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14. REVIEWS TABLE
+CREATE TABLE IF NOT EXISTS public.reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  from_user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  to_user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 15. AUTOMATIC TRIGGER FOR PROFILE & WALLET CREATION ON SIGNUP
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, full_name, email, role, account_status)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', 'New User'),
+    NEW.email,
+    CASE 
+      WHEN NEW.raw_user_meta_data->>'role' = 'admin' THEN 'admin'::user_role
+      WHEN NEW.raw_user_meta_data->>'role' = 'employer' THEN 'employer'::user_role
+      ELSE 'worker'::user_role
+    END,
+    'pending_payment'
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  INSERT INTO public.wallets (user_id, balance, total_earned, total_withdrawn)
+  VALUES (NEW.id, 0.00, 0.00, 0.00)
+  ON CONFLICT (user_id) DO NOTHING;
+
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 16. ROW LEVEL SECURITY (RLS) POLICIES
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payment_proofs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.wallets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.job_applications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.post_likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DO $$ BEGIN
+  EXECUTE 'DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can view own payments" ON public.payments';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can create payments" ON public.payments';
+  EXECUTE 'DROP POLICY IF EXISTS "Admin can update payments" ON public.payments';
+  EXECUTE 'DROP POLICY IF EXISTS "Public can view payment proofs" ON public.payment_proofs';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can submit payment proof" ON public.payment_proofs';
+  EXECUTE 'DROP POLICY IF EXISTS "Admin or owner can update proof" ON public.payment_proofs';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can view own wallet" ON public.wallets';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can insert own wallet" ON public.wallets';
+  EXECUTE 'DROP POLICY IF EXISTS "Public can view jobs" ON public.jobs';
+  EXECUTE 'DROP POLICY IF EXISTS "Employers can insert jobs" ON public.jobs';
+  EXECUTE 'DROP POLICY IF EXISTS "Admin can delete jobs" ON public.jobs';
+  EXECUTE 'DROP POLICY IF EXISTS "Applicants & employers view applications" ON public.job_applications';
+  EXECUTE 'DROP POLICY IF EXISTS "Workers can apply for jobs" ON public.job_applications';
+  EXECUTE 'DROP POLICY IF EXISTS "Public can view posts" ON public.posts';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can create posts" ON public.posts';
+  EXECUTE 'DROP POLICY IF EXISTS "Public can view post likes" ON public.post_likes';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can like posts" ON public.post_likes';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can unlike posts" ON public.post_likes';
+  EXECUTE 'DROP POLICY IF EXISTS "Participants view conversations" ON public.conversations';
+  EXECUTE 'DROP POLICY IF EXISTS "Authenticated users start conversations" ON public.conversations';
+  EXECUTE 'DROP POLICY IF EXISTS "Participants view messages" ON public.messages';
+  EXECUTE 'DROP POLICY IF EXISTS "Participants send messages" ON public.messages';
+  EXECUTE 'DROP POLICY IF EXISTS "Users view own notifications" ON public.notifications';
+  EXECUTE 'DROP POLICY IF EXISTS "Users update own notifications" ON public.notifications';
+  EXECUTE 'DROP POLICY IF EXISTS "Public view reviews" ON public.reviews';
+  EXECUTE 'DROP POLICY IF EXISTS "Users create reviews" ON public.reviews';
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id OR public.is_admin());
+CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id OR public.is_admin());
+
+CREATE POLICY "Users can view own payments" ON public.payments FOR SELECT USING (auth.uid() = user_id OR public.is_admin());
+CREATE POLICY "Users can create payments" ON public.payments FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Admin can update payments" ON public.payments FOR UPDATE USING (public.is_admin());
+
+CREATE POLICY "Public can view payment proofs" ON public.payment_proofs FOR SELECT USING (true);
+CREATE POLICY "Users can submit payment proof" ON public.payment_proofs FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_admin());
+CREATE POLICY "Admin or owner can update proof" ON public.payment_proofs FOR UPDATE USING (auth.uid() = user_id OR public.is_admin());
+
+CREATE POLICY "Users can view own wallet" ON public.wallets FOR SELECT USING (auth.uid() = user_id OR public.is_admin());
+CREATE POLICY "Users can insert own wallet" ON public.wallets FOR INSERT WITH CHECK (auth.uid() = user_id OR public.is_admin());
+
+CREATE POLICY "Public can view jobs" ON public.jobs FOR SELECT USING (true);
+CREATE POLICY "Employers can insert jobs" ON public.jobs FOR INSERT WITH CHECK (auth.uid() = employer_id OR public.is_admin());
+CREATE POLICY "Admin can delete jobs" ON public.jobs FOR DELETE USING (public.is_admin());
+
+CREATE POLICY "Applicants & employers view applications" ON public.job_applications FOR SELECT USING (auth.uid() = applicant_id OR public.is_admin());
+CREATE POLICY "Workers can apply for jobs" ON public.job_applications FOR INSERT WITH CHECK (auth.uid() = applicant_id);
+
+CREATE POLICY "Public can view posts" ON public.posts FOR SELECT USING (true);
+CREATE POLICY "Users can create posts" ON public.posts FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Public can view post likes" ON public.post_likes FOR SELECT USING (true);
+CREATE POLICY "Users can like posts" ON public.post_likes FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can unlike posts" ON public.post_likes FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Participants view conversations" ON public.conversations FOR SELECT USING (auth.uid() = participant_1 OR auth.uid() = participant_2 OR public.is_admin());
+CREATE POLICY "Authenticated users start conversations" ON public.conversations FOR INSERT WITH CHECK (auth.uid() = participant_1 OR auth.uid() = participant_2);
+CREATE POLICY "Participants view messages" ON public.messages FOR SELECT USING (EXISTS (SELECT 1 FROM public.conversations WHERE id = conversation_id AND (participant_1 = auth.uid() OR participant_2 = auth.uid())) OR public.is_admin());
+CREATE POLICY "Participants send messages" ON public.messages FOR INSERT WITH CHECK (auth.uid() = sender_id);
+
+CREATE POLICY "Users view own notifications" ON public.notifications FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users update own notifications" ON public.notifications FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Public view reviews" ON public.reviews FOR SELECT USING (true);
+CREATE POLICY "Users create reviews" ON public.reviews FOR INSERT WITH CHECK (auth.uid() = from_user_id);
+
+-- 17. STORAGE BUCKETS SETUP
+INSERT INTO storage.buckets (id, name, public) VALUES ('avatars', 'avatars', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('payment-proofs', 'payment-proofs', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('post-media', 'post-media', true) ON CONFLICT (id) DO NOTHING;
+
+DO $$ BEGIN
+  EXECUTE 'DROP POLICY IF EXISTS "Public bucket access" ON storage.objects';
+  EXECUTE 'DROP POLICY IF EXISTS "Authenticated bucket upload" ON storage.objects';
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+CREATE POLICY "Public bucket access" ON storage.objects FOR SELECT USING (bucket_id IN ('avatars', 'payment-proofs', 'post-media'));
+CREATE POLICY "Authenticated bucket upload" ON storage.objects FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+------------------------------- END OF SQL CODE --------------------------------
+
+5. After pasting, click the green "Run" button at the bottom right.
+6. You should see "Success. No rows returned" — this means your database is created!
+
+
+================================================================================
+STEP 6: Turn OFF Email Confirmation in Supabase
+================================================================================
+1. On the Supabase left sidebar menu, click "Authentication" (icon with a lock 🔒).
+2. Click "Providers" in the sub-menu.
+3. Click on "Email" to expand it.
+4. Turn OFF the switch for "Confirm email".
+5. Click the green "Save" button.
+
+(Why? This lets users sign up and log in immediately without waiting for confirmation emails!)
+
+
+================================================================================
+STEP 7: Start the Application on Your Computer
+================================================================================
+1. Open your terminal or command prompt.
+2. Change folder to the frontend directory:
+   cd frontend
+3. Run this command to install dependencies:
+   npm install
+4. Run this command to start the server:
+   npm run dev
+5. Open your web browser and go to: http://localhost:5173
+
+
+================================================================================
+STEP 8: How to Access the Admin Portal
+================================================================================
+1. Open http://localhost:5173/admin in your browser.
+2. The login fields are already prefilled for fast access:
+   - Email: admin@ilab.com
+   - Password: hello ilab
+3. Click "Sign In as Admin" OR click "⚡ One-Click Direct Admin Access".
+4. You are now inside the Admin Control Dashboard!
+
+
+================================================================================
+STEP 9: Admin Features Overview
+================================================================================
+From the Admin Control Dashboard at http://localhost:5173/admin, you can:
+
+1. PAYMENT APPROVALS TAB:
+   - Review uploaded payment screenshots (JazzCash, EasyPaisa, Bank).
+   - Click "Approve Payment" -> Automatically activates the worker's account,
+     opens their wallet, and schedules their 24h qualification test!
+   - Click "Reject" -> Prompts for reason and notifies worker.
+
+2. USER MANAGEMENT & BLOCKING TAB:
+   - Search and filter all registered workers, employers, and admins.
+   - Click "Block User" -> Instantly revokes login access across platform.
+   - Click "Reactivate" -> Reactivates accounts marked expired due to 3-day inactivity.
+
+3. JOB LISTING MODERATION TAB:
+   - View all active job postings by employers.
+   - Click "Delete Listing" -> Removes spam or non-compliant jobs from Supabase.
+
+
+================================================================================
+CONGRATULATIONS! YOUR PLATFORM IS READY TO USE!
+================================================================================
